@@ -1,17 +1,64 @@
-const axios = require('axios');
-const { Connection, PublicKey } = require('@solana/web3.js');
+import axios, { AxiosResponse } from 'axios';
+import { Connection, PublicKey } from '@solana/web3.js';
 
-class SolanaTokenAnalytics {
-    constructor(tokenMintAddress) {
-        this.tokenMintAddress = tokenMintAddress;
+interface TokenMetadata {
+    symbol: string;
+    name: string;
+}
+
+interface PriceDataPoint {
+    time: number;
+    price: number;
+    volume: number;
+}
+
+interface RaydiumPriceResponse {
+    data: PriceDataPoint[];
+    marketCap: number;
+    volume24h: number;
+}
+
+interface TokenAccountBalance {
+    value: {
+        uiAmount: number;
+    };
+}
+
+interface TokenHolder {
+    address: string;
+    balance: number;
+}
+
+interface TokenAnalytics {
+    symbol: string;
+    name: string;
+    price: number;
+    marketCap: number;
+    volume24h: number;
+    holders: number;
+    priceHistory: PriceHistory[];
+}
+
+interface PriceHistory {
+    timestamp: number;
+    price: number;
+    volume: number;
+}
+
+export class SolanaTokenAnalytics {
+    private readonly connection: Connection;
+    
+    constructor(private readonly tokenMintAddress: string) {
         this.connection = new Connection('https://api.mainnet-beta.solana.com');
     }
 
-    async getTokenInfo() {
+    public async getTokenInfo(): Promise<TokenAnalytics> {
         try {
             // Get token metadata from Raydium API
-            const raydiumResponse = await axios.get(`https://api.raydium.io/v2/main/token/${this.tokenMintAddress}`);
-            const tokenData = raydiumResponse.data;
+            const raydiumResponse: AxiosResponse<TokenMetadata> = await axios.get(
+                `https://api.raydium.io/v2/main/token/${this.tokenMintAddress}`
+            );
+            const tokenData: TokenMetadata = raydiumResponse.data;
 
             // Get price and liquidity data
             const priceData = await this.getPriceData();
@@ -34,13 +81,17 @@ class SolanaTokenAnalytics {
         }
     }
 
-    async getPriceData() {
+    private async getPriceData(): Promise<{
+        currentPrice: number;
+        marketCap: number;
+        volume24h: number;
+        priceHistory: PriceHistory[];
+    }> {
         try {
-            // Get 4h interval data from Raydium API
-            const now = Math.floor(Date.now() / 1000);
-            const fourHoursAgo = now - (4 * 60 * 60);
+            const now: number = Math.floor(Date.now() / 1000);
+            const fourHoursAgo: number = now - (4 * 60 * 60);
             
-            const priceResponse = await axios.get(
+            const priceResponse: AxiosResponse<RaydiumPriceResponse> = await axios.get(
                 `https://api.raydium.io/v2/main/price/${this.tokenMintAddress}`,
                 {
                     params: {
@@ -51,7 +102,7 @@ class SolanaTokenAnalytics {
                 }
             );
 
-            const priceHistory = priceResponse.data.data.map(item => ({
+            const priceHistory: PriceHistory[] = priceResponse.data.data.map(item => ({
                 timestamp: item.time,
                 price: item.price,
                 volume: item.volume
@@ -69,14 +120,17 @@ class SolanaTokenAnalytics {
         }
     }
 
-    async getHolderCount() {
+    private async getHolderCount(): Promise<number> {
         try {
-            // Get token holder count using Solana connection
             const mint = new PublicKey(this.tokenMintAddress);
             const tokenAccounts = await this.connection.getTokenLargestAccounts(mint);
-            const holders = await Promise.all(
+            
+            const holders: TokenHolder[] = await Promise.all(
                 tokenAccounts.value.map(async account => {
-                    const accountInfo = await this.connection.getTokenAccountBalance(account.address);
+                    const accountInfo: TokenAccountBalance = await this.connection.getTokenAccountBalance(
+                        account.address
+                    ) as TokenAccountBalance;
+                    
                     return {
                         address: account.address.toString(),
                         balance: accountInfo.value.uiAmount
@@ -92,13 +146,12 @@ class SolanaTokenAnalytics {
     }
 }
 
-// Example usage
-async function main() {
+const main = async (): Promise<void> => {
     try {
-        // Replace with your token's mint address
-        const tokenMintAddress = 'YOUR_TOKEN_MINT_ADDRESS';
+        
+        const tokenMintAddress: string = 'YOUR_TOKEN_MINT_ADDRESS';   // pass token address here
         const analytics = new SolanaTokenAnalytics(tokenMintAddress);
-        const tokenInfo = await analytics.getTokenInfo();
+        const tokenInfo: TokenAnalytics = await analytics.getTokenInfo();
         
         console.log('Token Information:');
         console.log(JSON.stringify(tokenInfo, null, 2));
@@ -111,13 +164,13 @@ async function main() {
         
         // Print 4h interval price history
         console.log('\nPrice History (4h intervals):');
-        tokenInfo.priceHistory.forEach(entry => {
+        tokenInfo.priceHistory.forEach((entry: PriceHistory): void => {
             const date = new Date(entry.timestamp * 1000);
             console.log(`Time: ${date.toISOString()}, Price: $${entry.price}, Volume: $${entry.volume}`);
         });
     } catch (error) {
         console.error('Error in main:', error);
     }
-}
+};
 
 main();
